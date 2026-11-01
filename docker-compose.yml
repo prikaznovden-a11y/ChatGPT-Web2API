@@ -18,6 +18,9 @@ services:
       # Chrome под root требует --no-sandbox; проект не умеет передавать доп. аргументы,
       # поэтому используем обёртку (см. docker/chrome-wrapper.sh).
       W2A_CHROME_PATH: "/usr/local/bin/chrome-wrapper"
+      # Тёплый профиль Chrome (сотни МБ) после рестарта контейнера открывает
+      # debug-порт дольше 30 c - приложение убивало Chrome и падало.
+      W2A_CDP_START_TIMEOUT: "180"
       # Ключ доступа к API шлюза (обязателен - иначе прокси открыт в сеть).
       W2A_API_KEYS: "${W2A_API_KEY}"
       W2A_ALLOW_UNAUTH_REMOTE: "false"

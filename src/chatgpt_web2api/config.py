@@ -56,6 +56,12 @@ class ChromeConfig:
     headless: bool = False
     extra_args: list[str] = field(default_factory=list)
     restart_on_crash: bool = True
+    # How long to wait for Chrome's CDP endpoint to answer after a launch.
+    # 30s is not always enough: a warm profile (a few hundred MB, restored
+    # session state) can make Chrome spend longer before it opens the debug
+    # port — especially right after a container restart, when the page cache
+    # is cold. W2A_CDP_START_TIMEOUT raises it.
+    cdp_start_timeout: float = 30.0
 
 
 @dataclass
@@ -317,6 +323,8 @@ class Config:
             self.chrome.user_data_dir = v
         if v := _env("W2A_CDP_PORT"):
             self.chrome.cdp_port = int(v)
+        if v := _env("W2A_CDP_START_TIMEOUT"):
+            self.chrome.cdp_start_timeout = float(v)
         if v := _env("W2A_PORT"):
             self.server.port = int(v)
         if v := _env("W2A_HOST"):

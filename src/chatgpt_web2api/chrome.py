@@ -125,7 +125,7 @@ class ChromeProcess:
             self._owns_chrome = True
             try:
                 await self._launch()
-                await self._wait_for_cdp(timeout=30)
+                await self._wait_for_cdp(timeout=self._cfg.cdp_start_timeout)
             except Exception:
                 # Drop ownership so a fresh process can elect; clean up the
                 # half-started Chrome so the next starter isn't competing.
