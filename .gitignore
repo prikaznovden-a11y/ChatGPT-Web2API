@@ -17,3 +17,6 @@ sentinel_flow.json
 
 # ChatGPT collaboration binding (local only)
 .chatgpt-collaboration.json
+
+# Cookies contain live ChatGPT session tokens - never commit
+cookies.json
