@@ -75,6 +75,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+from .dom_selectors import DOM_STATE_JS, TURN_STATE_COMPLETE
+
 
 # A generation is considered "stuck" (vs. merely slow) if no DOM progress
 # signal occurs within this window. Slow-but-progressing generations
@@ -472,92 +474,7 @@ class CompletionDetector:
         last_conv_id_probe = 0.0
         while time.monotonic() < deadline:
             try:
-                result = await d._js_strict(
-                    "(function() {"
-                    "  var msgs = document.querySelectorAll('[data-message-author-role=\"assistant\"], [data-content-search-unit-key$=\":assistant\"], [data-chatgpt-search-unit-key$=\":assistant\"]');"
-                    "  if (!msgs.length) return JSON.stringify({text:'', md_text:'', html_len:0, child_count:0, has_action:false, is_thinking:false});"
-                    "  var last = msgs[msgs.length - 1];"
-                    # Text: the clean answer lives in ``.markdown`` textContent.
-                    # It's empty during streaming and populates as the turn
-                    # settles — so we ALSO capture ``innerText`` (populated
-                    # during streaming) as a fallback. innerText includes the
-                    # reasoning UI label ("Thinking.../Thought for N seconds"),
-                    # so md_text is captured SEPARATELY and Python prefers it;
-                    # the innerText fallback is trimmed of the leading label.
-                    "  var md = last.querySelector('.markdown');"
-                    "  var mdText = md ? (md.textContent || '') : '';"
-                    "  var rawText = (last.innerText || '').trim();"
-                    # Strip a leading "Thinking..." / "Thought for …" reasoning
-                    # label so the innerText fallback can't leak it as a delta.
-                    "  var text = mdText || rawText.replace(/^Think(ing|\\s+for)[^\\n]*\\n?/i, '');"
-                    "  var html_len = last.innerHTML.length;"
-                    "  var child_count = last.children.length;"
-                    # has_action: the per-turn copy/feedback action row appears
-                    # only on a COMPLETED message. ChatGPT's DOM layout puts these
-                    # buttons in a SIBLING/UNCLE container, NOT as descendants of
-                    # the assistant message node — so a plain
-                    # ``last.querySelector(...)`` finds nothing and completion is
-                    # never detected (every send stalled at the 90s ceiling). The
-                    # fix: walk up ancestors, querying down at each scope, and
-                    # require the button to be GEOMETRICALLY NEAR the message so
-                    # an older turn's action row can't falsely complete a brand-new
-                    # answer. New testid scheme is ``*-turn-action-button``
-                    # (copy/good-response/bad-response); the legacy
-                    # ``response-turn`` selector is retained for older deployments
-                    # but no longer matches anything on current ChatGPT.
-                    #
-                    # Depth was 4; raised to 8 after issue #12 found the action
-                    # row at ancestor depth 6. The geometry window is widened to
-                    # accept buttons rendered ABOVE the message (top - 180) —
-                    # short answers place the action row in the spacing above the
-                    # message node, which the old top-8 gate rejected. This is a
-                    # FALLBACK signal now (backend end_turn is primary); kept as an
-                    # escape hatch for when conv_id is unavailable or backend fails.
-                    '  var ACT = \'[data-testid="copy-turn-action-button"],'
-                    '            [data-testid="good-response-turn-action-button"],'
-                    '            [data-testid="bad-response-turn-action-button"],'
-                    '            [data-testid*="turn-action-button"],'
-                    '            [data-testid*="copy"],'
-                    '            [data-testid*="response-turn"]\';'
-                    "  var has_action = (function() {"
-                    "    var lastRect = last.getBoundingClientRect();"
-                    "    var scope = last;"
-                    "    for (var d = 0; scope && d <= 8; d++, scope = scope.parentElement) {"
-                    "      var btns = Array.prototype.filter.call("
-                    "        scope.querySelectorAll(ACT),"
-                    "        function(el){ return el.offsetParent !== null || el.getClientRects().length > 0; }"
-                    "      );"
-                    "      if (!btns.length) continue;"
-                    "      for (var i = 0; i < btns.length; i++) {"
-                    "        var r = btns[i].getBoundingClientRect();"
-                    "        if (r.top >= lastRect.top - 180 && r.top <= lastRect.bottom + 240) {"
-                    "          return true;"
-                    "        }"
-                    "      }"
-                    "    }"
-                    "    return false;"
-                    "  })();"
-                    # is_thinking: the active-reasoning indicator. Narrowed to
-                    # ``.result-thinking`` AND ``!has_action`` — the action
-                    # button marks a finished turn, and ``.result-thinking``
-                    # lingers in the DOM after completion as a collapsed
-                    # "Thought process" section. WITHOUT the has_action gate
-                    # this stayed true forever, and the old ``/thinking/i``
-                    # word-match on innerText matched the persistent
-                    # "Thought for N seconds" summary label — together they
-                    # pinned is_thinking=true on every thinking-model turn
-                    # and on any answer that mentioned the word "thinking",
-                    # which suppressed all delta emission (see the elif below)
-                    # and produced empty responses when the backend fetch lagged.
-                    # Also recognize a plain "Thinking..." innerText placeholder
-                    # (some layouts show reasoning text without .result-thinking)
-                    # so the stall clock treats it as active generation, not a stall.
-                    "  var hasThinkingEl = !!last.querySelector('.result-thinking');"
-                    "  var visibleThinking = /^(thinking|reasoning)\\b/i.test(rawText.trim());"
-                    "  var is_thinking = !has_action && (hasThinkingEl || (visibleThinking && !mdText));"
-                    "  return JSON.stringify({text: text, md_text: mdText, html_len: html_len, child_count: child_count, has_action: has_action, is_thinking: is_thinking});"
-                    "})()",
-                )
+                result = await d._js_strict(DOM_STATE_JS)
                 data = json.loads(result)
             except (CDPJSError, json.JSONDecodeError, TypeError):
                 await asyncio.sleep(0.5)
@@ -569,6 +486,21 @@ class CompletionDetector:
             child_count = data.get("child_count", 0)
             has_action = data.get("has_action", False)
             is_thinking = data.get("is_thinking", False)
+            # Current ChatGPT UI: the turn wrapper carries
+            # data-talvt-turn-state="in_progress" while the model streams and
+            # "complete" once the turn finished. This is the authoritative
+            # completion signal in the current DOM (the legacy per-turn action
+            # button no longer exists there).
+            #
+            # Two guards are required, both observed live:
+            #   1. The Stop button must be GONE. It is present exactly while
+            #      the model is generating.
+            #   2. The turn state alone is not enough — a fresh turn reports
+            #      "complete" before its content renders, so a "complete" turn
+            #      with no answer text must not finish the request.
+            turn_state = data.get("turn_state", "") or ""
+            stop_present = bool(data.get("stop_present", False))
+            turn_complete = turn_state == TURN_STATE_COMPLETE and not stop_present
 
             # Streaming source: prefer the clean .markdown answer container
             # over the innerText fallback (which carries the reasoning label).
@@ -734,6 +666,23 @@ class CompletionDetector:
                 and (last_dom_text or had_non_text_content)
             ):
                 logger.info("DOM has_action (fallback completion) — no backend signal")
+                break
+
+            # Current-UI completion signal: the turn wrapper reports
+            # data-talvt-turn-state="complete". In the current ChatGPT DOM the
+            # legacy per-turn action button no longer exists, so has_action
+            # stays false forever and phase 2 would stall until the ceiling
+            # even though the answer is fully rendered. The turn state is
+            # per-turn (the wrapper of the LAST assistant node), so it cannot
+            # be satisfied by an earlier turn's action row.
+            #
+            # Strict content guard is kept: a "complete" turn with no answer
+            # text yet must not finish the request.
+            if (
+                turn_complete
+                and (last_dom_text or had_non_text_content)
+            ):
+                logger.info("DOM turn_state=complete (fallback completion)")
                 break
 
             # ── P1: model-aware two-state stall detection ───────────────────

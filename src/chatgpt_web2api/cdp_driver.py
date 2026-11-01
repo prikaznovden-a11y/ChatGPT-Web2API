@@ -1832,7 +1832,17 @@ class CDPDriver:
                     await asyncio.sleep(0.5)
                     continue
                 if "/c/" in url:
-                    conv_id = url.split("/c/")[1].split("/")[0].split("?")[0]
+                    candidate = url.split("/c/")[1].split("/")[0].split("?")[0]
+                    # A brand-new chat briefly shows the PLACEHOLDER id
+                    # "/c/local-chatgpt%3A<uuid>" before ChatGPT swaps in the
+                    # real conversation UUID. The placeholder is not a known
+                    # conversation, so the anchored reconciliation below would
+                    # fetch against it and never match. Keep polling until the
+                    # real id lands.
+                    if candidate.lower().startswith("local-chatgpt"):
+                        await asyncio.sleep(0.5)
+                        continue
+                    conv_id = candidate
                     break
                 await asyncio.sleep(0.5)
 

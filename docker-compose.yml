@@ -1,0 +1,38 @@
+services:
+  chatgpt-proxy:
+    image: chatgpt-web2api:xvfb
+    container_name: chatgpt-proxy
+    restart: unless-stopped
+    init: true
+    ports:
+      - "8086:8080"      # OpenAI-совместимый API
+      - "9223:9222"      # CDP (для отладки/инспекции Chrome)
+    environment:
+      # Headed Chrome на виртуальном дисплее: headless ловит анти-бот ChatGPT.
+      W2A_HEADLESS: "false"
+      W2A_PORT: "8080"
+      W2A_CDP_PORT: "9222"
+      W2A_HOST: "0.0.0.0"
+      W2A_LOG_LEVEL: "INFO"
+      W2A_DEFAULT_MODEL: "auto"
+      # Chrome под root требует --no-sandbox; проект не умеет передавать доп. аргументы,
+      # поэтому используем обёртку (см. docker/chrome-wrapper.sh).
+      W2A_CHROME_PATH: "/usr/local/bin/chrome-wrapper"
+      # Ключ доступа к API шлюза (обязателен - иначе прокси открыт в сеть).
+      W2A_API_KEYS: "${W2A_API_KEY}"
+      W2A_ALLOW_UNAUTH_REMOTE: "false"
+    volumes:
+      # cookies.json: выгруженные из залогиненного браузера (формат: JSON-массив).
+      - ./cookies.json:/data/cookies/cookies.json:ro
+      # Постоянный профиль Chrome (переживает рестарты контейнера).
+      - chatgpt-profile:/data/chrome-profile
+    shm_size: "1gb"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 3
+
+volumes:
+  chatgpt-profile:

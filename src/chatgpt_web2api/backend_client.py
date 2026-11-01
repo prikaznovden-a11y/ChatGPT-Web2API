@@ -232,7 +232,18 @@ class BackendClient:
             return ""
         if not url or "/c/" not in url:
             return ""
-        return url.split("/c/")[1].split("/")[0].split("?")[0]
+        conv_id = url.split("/c/")[1].split("/")[0].split("?")[0]
+        # ChatGPT navigates a brand-new chat to a PLACEHOLDER conversation id
+        # first ("/c/local-chatgpt%3A<uuid>") and only ~1s later replaces it
+        # with the real conversation UUID ("/c/<uuid>"). The placeholder is
+        # NOT a conversation the backend API knows about, so using it as the
+        # conv_id makes every backend end_turn fetch fail — the primary
+        # completion signal is then permanently unavailable and phase 2
+        # stalls until the ceiling. Reject the placeholder so the caller keeps
+        # polling for the real id.
+        if conv_id.lower().startswith("local-chatgpt"):
+            return ""
+        return conv_id
 
     async def _get_live_conversation_id_best_effort(self) -> str:
         """Resolve the in-flight conversation id by cheapest available source.

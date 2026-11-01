@@ -1,0 +1,49 @@
+# Локальный слой поверх официального образа ChatGPT-Web2API.
+#
+# Зачем: официальный Dockerfile ставит google-chrome-stable, но НЕ ставит Xvfb и
+# X-библиотеки, а Chrome по умолчанию запускается в headed-режиме
+# (W2A_HEADLESS=false) - headless Chrome ловит анти-бот ChatGPT. Без виртуального
+# дисплея контейнер без дисплея (наш случай - Docker Desktop на Windows) не
+# сможет запустить Chrome вообще.
+#
+# Добавляем: xvfb + x11-библиотеки + шрифты (без шрифтов Chrome падает на
+# отображении кириллицы) и запускаем под DISPLAY=:99.
+FROM chatgpt-web2api:base
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        xvfb \
+        x11-utils \
+        xauth \
+        fonts-liberation \
+        fonts-dejavu-core \
+        fonts-noto-core \
+        fonts-noto-cjk \
+        libx11-6 libxext6 libxfixes3 libxrandr2 libxi6 libxtst6 \
+        libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+        libdrm2 libgbm1 libglib2.0-0 libpango-1.0-0 libcairo2 libasound2 \
+        libxcomposite1 libxdamage1 libxkbcommon0 libpangocairo-1.0-0 \
+        fonts-wqy-zenhei \
+    && rm -rf /var/lib/apt/lists/*
+
+# Виртуальный дисплей на весь срок жизни контейнера + запуск Chrome под ним.
+# DISPLAY прокинут в окружение приложения, чтобы и сам proxy, и Chrome видели его.
+ENV DISPLAY=:99
+ENV W2A_HEADLESS=false
+ENV W2A_CDP_PORT=9222
+
+# Переопределяем entrypoint: поднимаем Xvfb, затем штатный entrypoint оригинала
+# (он сам инжектит cookies и поднимает proxy).
+#
+# ВАЖНО: оригинальный /docker-entrypoint.sh приходит с CRLF-переводами строк, поэтому
+# его shebang читается как "#!/bin/bash\r" и bash сообщает "cannot execute:
+# required file not found". Нормализуем переводы строк в самом образе.
+RUN sed -i 's/\r$//' /docker-entrypoint.sh && head -1 /docker-entrypoint.sh
+
+COPY entrypoint-xvfb.sh /entrypoint-xvfb.sh
+RUN sed -i 's/\r$//' /entrypoint-xvfb.sh && chmod +x /entrypoint-xvfb.sh
+ENTRYPOINT ["/entrypoint-xvfb.sh"]
+
+# Обёртка Chrome: добавляет --no-sandbox (Chrome под root иначе не стартует)
+# и --disable-dev-shm-usage (маленький /dev/shm в Docker).
+COPY chrome-wrapper.sh /usr/local/bin/chrome-wrapper
+RUN sed -i 's/\r$//' /usr/local/bin/chrome-wrapper && chmod +x /usr/local/bin/chrome-wrapper

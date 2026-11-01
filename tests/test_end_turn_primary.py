@@ -204,13 +204,16 @@ def test_has_action_js_walks_depth_8():
     was too shallow.
 
     Phase 5 PR4: the Phase-2 completion-detection JS moved from
-    CDPDriver.send_and_stream into CompletionDetector.stream_until_complete;
-    inspect the detector (the JS's new canonical home)."""
-    import inspect
+    CDPDriver.send_and_stream into CompletionDetector.stream_until_complete.
 
-    from chatgpt_web2api.completion_detector import CompletionDetector
+    Current-UI fix: that JS moved once more into the shared
+    ``chatgpt_web2api.dom_selectors`` module, which now holds the DOM probe
+    for BOTH the legacy and the current ChatGPT markup. The invariants
+    (depth-8 walk, geometry window) are unchanged — only their home moved.
+    """
+    from chatgpt_web2api.dom_selectors import DOM_STATE_JS
 
-    src = inspect.getsource(CompletionDetector.stream_until_complete)
+    src = DOM_STATE_JS
     # The walk loop bound must be 8, not the old 4
     assert "d <= 8" in src, "has_action JS must walk d <= 8 ancestors (was 4)"
     assert "d <= 4" not in src, "old d <= 4 depth limit must be gone"
@@ -224,12 +227,12 @@ def test_has_action_js_geometry_accepts_above_message():
     geometry gate must accept top >= lastRect.top - 180 (was -8). Structural
     check on the JS source.
 
-    Phase 5 PR4: JS moved to CompletionDetector.stream_until_complete."""
-    import inspect
+    Phase 5 PR4: JS moved to CompletionDetector.stream_until_complete.
+    Current-UI fix: JS moved to chatgpt_web2api.dom_selectors.DOM_STATE_JS.
+    """
+    from chatgpt_web2api.dom_selectors import DOM_STATE_JS
 
-    from chatgpt_web2api.completion_detector import CompletionDetector
-
-    src = inspect.getsource(CompletionDetector.stream_until_complete)
+    src = DOM_STATE_JS
     # The geometry window must be widened to top-180 (the #12 short-answer case)
     assert "lastRect.top - 180" in src, (
         "geometry gate must accept buttons 180px above message (was top - 8)"
